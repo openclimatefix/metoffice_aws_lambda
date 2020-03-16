@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  metoffice-aws-lambda
+
+  Sample SAM Template for metoffice-aws-lambda
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+Resources:
+  MetOfficeAwsLambdaFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: metoffice_aws_lambda/
+      Handler: app.lambda_handler
+      Runtime: python3.8
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  MetOfficeAwsLambdaFunction:
+    Description: "Met Office AWS Lambda Function ARN"
+    Value: !GetAtt MetOfficeAwsLambdaFunction.Arn
+  MetOfficeAwsLambdaIamRole:
+    Description: "Implicit IAM Role created for Met Office AWS Lambda function"
+    Value: !GetAtt MetOfficeAwsLambdaFunctionRole.Arn
