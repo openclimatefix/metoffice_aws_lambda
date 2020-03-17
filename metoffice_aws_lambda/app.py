@@ -1,5 +1,4 @@
 import xarray as xr
-import numpy as np
 import numcodecs
 import pandas as pd
 import os
@@ -8,6 +7,7 @@ import s3fs
 import json
 from typing import Dict
 import time
+import hashlib
 
 
 PARAMS_TO_COPY = [
@@ -29,7 +29,7 @@ def load_and_filter_nc_file(file_obj):
     dataset = xr.open_dataset(file_obj, engine='h5netcdf')
     dataset = dataset.sel(height=HEIGHT_METERS).loc[
         dict(
-            projection_x_coordinate=slice(WEST, EAST),  
+            projection_x_coordinate=slice(WEST, EAST),
             projection_y_coordinate=slice(SOUTH, NORTH))]
 
     return dataset
@@ -117,13 +117,11 @@ def lambda_handler(event: Dict, context: object) -> Dict:
         Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
     """
     for sns_message in event['Records']:
-        print(sns_message)
         process_record(sns_message)
 
 
 def extract_mo_message(sns_message):
-    """Return Met Office message from SNS message."""
-    import hashlib
+    """Return Met Office (MO) message from SNS message."""
     body_json_string = sns_message['body']
     body_json_string = body_json_string.encode('utf-8')
     md5 = hashlib.md5(body_json_string)
@@ -132,7 +130,11 @@ def extract_mo_message(sns_message):
 
     body_dict = json.loads(body_json_string)
     mo_message = json.loads(body_dict['Message'])
-    sent_timestamp = float(body_dict['attributes']['SentTimestamp']) / 1000
+
+    # Include SQS details in MO message.
+    mo_message['sqs_message_id'] = sns_message['messageId']
+    sns_attributes = sns_message['attributes']
+    sent_timestamp = float(sns_attributes['SentTimestamp']) / 1000
     mo_message['message_sent_timestamp'] = pd.Timestamp.fromtimestamp(
         sent_timestamp)
     return mo_message
@@ -158,6 +160,7 @@ def process_record(sns_message):
           '; created_time=', mo_message['created_time'],
           '; time=', mo_message['time'],
           '; source_url=', source_url,
+          '; SQS_message_ID=', mo_message['sqs_message_id'],
           sep='')
 
     if do_copy:
