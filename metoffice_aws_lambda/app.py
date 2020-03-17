@@ -7,6 +7,7 @@ import lzma
 import s3fs
 import json
 from typing import Dict
+import time
 
 
 PARAMS_TO_COPY = [
@@ -50,13 +51,14 @@ def get_zarr_path_and_filename(dataset):
         model_name,
         var_name,
         forecast_ref_time.strftime('%Y/m%m/d%d/h%H'))
-    
-    base_filename = '{model_name}__{var_name}__{ref_time}__{valid_time}.zarr'.format(
-        model_name=model_name,
-        var_name=var_name,
-        ref_time=forecast_ref_time.strftime('%Y-%m-%dT%H'),
-        valid_time=valid_time.strftime('%Y-%m-%dT%H'))
-    
+
+    base_filename = (
+        '{model_name}__{var_name}__{ref_time}__{valid_time}.zarr'.format(
+            model_name=model_name,
+            var_name=var_name,
+            ref_time=forecast_ref_time.strftime('%Y-%m-%dT%H'),
+            valid_time=valid_time.strftime('%Y-%m-%dT%H')))
+
     return path, base_filename
 
 
@@ -69,20 +71,59 @@ def write_zarr_to_s3(dataset, dest_bucket, s3):
     zarr_path = os.path.join(dest_bucket, zarr_path)
     full_zarr_filename = os.path.join(zarr_path, base_zarr_filename)
     if s3.exists(full_zarr_filename):
-        raise FileExistsError('Destination already exists: {}'.format(full_zarr_filename))
+        raise FileExistsError(
+            'Destination already exists: {}'.format(full_zarr_filename))
 
     s3.makedirs(path=zarr_path)
-    store = s3fs.S3Map(root=full_zarr_filename, s3=s3, check=False, create=True)
-    
+    store = s3fs.S3Map(
+        root=full_zarr_filename, s3=s3, check=False, create=True)
+
     lzma_filters = [
         dict(id=lzma.FILTER_DELTA, dist=4),
         dict(id=lzma.FILTER_LZMA2, preset=9)]
     compressor = numcodecs.LZMA(filters=lzma_filters, format=lzma.FORMAT_RAW)
     var_name = get_variable_name(dataset)
     encoding = {var_name: {'compressor': compressor}}
-    
+
     dataset.to_zarr(store, mode='w', consolidated=True, encoding=encoding)
     return full_zarr_filename
+
+
+def s3_open_with_retry(s3, source_url, max_retries=21):
+    # Sometimes the file isn't immediately available on S3
+    total_sleep_seconds = 0
+    for retry_attempt in range(max_retries):
+        try:
+            source_store = s3.open(source_url)
+        except FileNotFoundError:
+            sleep_seconds = retry_attempt ** 1.5
+            total_sleep_seconds += sleep_seconds
+            time.sleep(sleep_seconds)
+        else:
+            if retry_attempt > 0:
+                print(
+                    'File found after {} tries and {:.1f}s sleeping: {}'
+                    .format(retry_attempt+1, total_sleep_seconds, source_url))
+            return source_store
+
+    raise FileNotFoundError(
+        'after {} tries and {:.1f}s sleeping: {}'.format(
+            retry_attempt+1, total_sleep_seconds, source_url))
+
+
+class Timer:
+    def __init__(self):
+        self.t = time.time()
+        self.times = []
+
+    def tick(self, label=''):
+        now = time.time()
+        time_since_last_tick = now - self.t
+        self.t = now
+        self.times.append((label, '{:.2f}s'.format(time_since_last_tick)))
+
+    def __str__(self):
+        return str(self.times)
 
 
 def lambda_handler(event: Dict, context: object) -> Dict:
@@ -91,54 +132,48 @@ def lambda_handler(event: Dict, context: object) -> Dict:
     Parameters
     ----------
     event: dict, required
-        API Gateway Lambda Proxy Input Format
-
-        Event doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-input-format
 
     context: object, required
         Lambda Context runtime methods and attributes
 
         Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
-
-    Returns
-    ------
-    API Gateway Lambda Proxy Output Format: dict
-
-        Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
     """
-    
-    status_code = 200
-    
-    mo_message = event['Records'][0]['Sns']['Message']
+    sns_message = event['Records'][0]['Sns']
+    mo_message = sns_message['Message']
     mo_message = json.loads(mo_message)
+    sns_timestamp = sns_message['Timestamp']
     source_bucket = mo_message['bucket']
     source_key = mo_message['key']
     source_url = os.path.join(source_bucket, source_key)
     var_name = mo_message['name']
-    dest_bucket = context.function_name
-    do_copy = var_name in PARAMS_TO_COPY and 'height' in mo_message and ' ' in mo_message['height']
-    dest_exists = False
-    status_body = {
-        'source_url': source_url,
-        'dest_bucket': dest_bucket,
-        'var_name': var_name,
-        'do_copy': do_copy}
+    dest_bucket = 'metoffice-nwp'
+    is_multi_level = 'height' in mo_message and ' ' in mo_message['height']
+    do_copy = var_name in PARAMS_TO_COPY and is_multi_level
+
+    print('do_copy=', do_copy,
+          '; var_name=', var_name,
+          '; is_multi_level=', is_multi_level,
+          '; object_size={:,.1f} MB'.format(mo_message['object_size'] / 1E6),
+          '; model=', mo_message['model'],
+          '; sns_timestamp=', sns_timestamp,
+          '; forecast_reference_time=', mo_message['forecast_reference_time'],
+          '; created_time=', mo_message['created_time'],
+          '; time=', mo_message['time'],
+          '; source_url=', source_url,
+          sep='')
 
     if do_copy:
+        timer = Timer()
+        s3 = s3fs.S3FileSystem()
+        source_store = s3_open_with_retry(s3, source_url)
+        timer.tick('open s3 file')
+        dataset = load_and_filter_nc_file(source_store)
+        timer.tick('load_and_filter_nc_file')
         try:
-            s3 = s3fs.S3FileSystem()
-            source_store = s3.open(source_url)
-            dataset = load_and_filter_nc_file(source_store)
             full_zarr_filename = write_zarr_to_s3(dataset, dest_bucket, s3)
         except FileExistsError as e:
-            status_body['report'] = str(e)
-        except Exception as e:
-            status_code = 500
-            status_body['report'] = str(e)
+            print(e)
         else:
-            status_body['dest_url'] = full_zarr_filename
-            status_body['report'] = 'success'
-
-    return {
-        'statusCode': status_code,
-        'body': status_body}
+            timer.tick('write zarr to s3')
+            print(timer)
+            print('SUCCESS! dest_url=', full_zarr_filename, sep='')

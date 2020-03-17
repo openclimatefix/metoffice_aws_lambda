@@ -2,10 +2,11 @@ Simple AWS Lambda function to extract specific parts of the UK Met Office's UKV 
 
 ## Installation on Linux
 
-Install the AWS SAM CLI:
+Install conda environment.  Then find where Python is installed for your conda env (e.g. `~/
+miniconda3/envs/metoffice_aws_lambda/bin/pip`) and run:
 
 ```shell
-pip3 install --user aws-sam-cli
+~/miniconda3/envs/metoffice_aws_lambda/bin/pip install aws-sam-cli
 ```
 
 Add this line to `~/.bash_aliases`:
@@ -16,4 +17,12 @@ alias sam='python3 -m samcli'
 
 And then load with `source ~/.bash_aliases`
 
-Initialise the SAM project with `sam init`
+Build and deploy with:
+
+```
+sam build && sam deploy
+```
+
+
+## Configure AWS permissions
+

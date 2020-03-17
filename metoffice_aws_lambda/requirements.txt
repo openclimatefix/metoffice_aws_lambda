@@ -1,4 +1,5 @@
 xarray
 h5netcdf
+zarr
 numcodecs
 s3fs
