@@ -148,6 +148,8 @@ def process_record(sns_message):
     var_name = mo_message['name']
     dest_bucket = 'metoffice-nwp'
     is_multi_level = 'height' in mo_message and ' ' in mo_message['height']
+
+    # do_copy is True if this message is about an NWP we want to process.
     do_copy = var_name in PARAMS_TO_COPY and is_multi_level
 
     print('do_copy=', do_copy,
