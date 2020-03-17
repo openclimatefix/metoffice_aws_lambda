@@ -89,28 +89,6 @@ def write_zarr_to_s3(dataset, dest_bucket, s3):
     return full_zarr_filename
 
 
-def s3_open_with_retry(s3, source_url, max_retries=21):
-    # Sometimes the file isn't immediately available on S3
-    total_sleep_seconds = 0
-    for retry_attempt in range(max_retries):
-        try:
-            source_store = s3.open(source_url)
-        except FileNotFoundError:
-            sleep_seconds = retry_attempt ** 1.5
-            total_sleep_seconds += sleep_seconds
-            time.sleep(sleep_seconds)
-        else:
-            if retry_attempt > 0:
-                print(
-                    'File found after {} tries and {:.1f}s sleeping: {}'
-                    .format(retry_attempt+1, total_sleep_seconds, source_url))
-            return source_store
-
-    raise FileNotFoundError(
-        'after {} tries and {:.1f}s sleeping: {}'.format(
-            retry_attempt+1, total_sleep_seconds, source_url))
-
-
 class Timer:
     def __init__(self):
         self.t = time.time()
@@ -165,7 +143,7 @@ def lambda_handler(event: Dict, context: object) -> Dict:
     if do_copy:
         timer = Timer()
         s3 = s3fs.S3FileSystem()
-        source_store = s3_open_with_retry(s3, source_url)
+        source_store = s3.open(source_url)
         timer.tick('open s3 file')
         dataset = load_and_filter_nc_file(source_store)
         timer.tick('load_and_filter_nc_file')
