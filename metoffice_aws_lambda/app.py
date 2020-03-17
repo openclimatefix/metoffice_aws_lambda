@@ -116,10 +116,30 @@ def lambda_handler(event: Dict, context: object) -> Dict:
 
         Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
     """
-    sns_message = event['Records'][0]['Sns']
-    mo_message = sns_message['Message']
-    mo_message = json.loads(mo_message)
-    sns_timestamp = sns_message['Timestamp']
+    for sns_message in event['Records']:
+        print(sns_message)
+        process_record(sns_message)
+
+
+def extract_mo_message(sns_message):
+    """Return Met Office message from SNS message."""
+    import hashlib
+    body_json_string = sns_message['body']
+    body_json_string = body_json_string.encode('utf-8')
+    md5 = hashlib.md5(body_json_string)
+    if md5.hexdigest() != sns_message['md5OfBody']:
+        raise RuntimeError('MD5 checksum does not match!')
+
+    body_dict = json.loads(body_json_string)
+    mo_message = json.loads(body_dict['Message'])
+    sent_timestamp = float(body_dict['attributes']['SentTimestamp']) / 1000
+    mo_message['message_sent_timestamp'] = pd.Timestamp.fromtimestamp(
+        sent_timestamp)
+    return mo_message
+
+
+def process_record(sns_message):
+    mo_message = extract_mo_message(sns_message)
     source_bucket = mo_message['bucket']
     source_key = mo_message['key']
     source_url = os.path.join(source_bucket, source_key)
@@ -133,7 +153,7 @@ def lambda_handler(event: Dict, context: object) -> Dict:
           '; is_multi_level=', is_multi_level,
           '; object_size={:,.1f} MB'.format(mo_message['object_size'] / 1E6),
           '; model=', mo_message['model'],
-          '; sns_timestamp=', sns_timestamp,
+          '; message_sent_timestamp=', mo_message['message_sent_timestamp'],
           '; forecast_reference_time=', mo_message['forecast_reference_time'],
           '; created_time=', mo_message['created_time'],
           '; time=', mo_message['time'],
