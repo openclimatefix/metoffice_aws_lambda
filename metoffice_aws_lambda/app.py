@@ -98,7 +98,9 @@ class Timer:
         now = time.time()
         time_since_last_tick = now - self.t
         self.t = now
-        self.times.append((label, '{:.2f}s'.format(time_since_last_tick)))
+        entry = (label, '{:.2f}s'.format(time_since_last_tick))
+        print(entry)
+        self.times.append(entry)
 
     def __str__(self):
         return str(self.times)
