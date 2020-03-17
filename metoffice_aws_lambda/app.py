@@ -170,6 +170,7 @@ def process_record(sns_message):
     if do_copy:
         timer = Timer()
         s3 = s3fs.S3FileSystem()
+        timer.tick('instantiate S3FileSystem')
         source_store = s3.open(source_url)
         timer.tick('open s3 file')
         dataset = load_and_filter_nc_file(source_store)
