@@ -2,6 +2,8 @@ Simple AWS Lambda function to extract specific parts of the UK Met Office's UKV 
 
 The Lambda function itself is the `lambda_handler` function in `metoffice_aws_lambda/app.py`
 
+**Please note that this code is no longer being maintained or used (because it was too expensive to run thousands of long-running jobs on Lambda!)  Instead we're using EC2.  See the new [metoffice_ec2 code](https://github.com/openclimatefix/metoffice_ec2), which supercedes `metoffice_aws_lambda`.**
+
 ## Installation on Linux
 
 Install conda environment.  Then find where Python is installed for your conda env (e.g. `~/
